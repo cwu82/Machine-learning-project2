@@ -1,0 +1,107 @@
+library(AppliedPredictiveModeling)
+
+library(caret)
+
+library(ElemStatLearn)
+
+library(pgmm)
+
+library(rpart)
+
+library(gbm)
+
+library(lubridate)
+
+library(forecast)
+
+library(e1071)
+
+library(readxl)
+
+#read data
+#note: do not read NA, 
+rawData <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", row.names = 1, na.strings = c("", "NA", "#DIV/0!"))
+predicting <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", row.names = 1, na.strings = c("", "NA", "#DIV/0!"))
+
+#wrangling with the data
+
+library(caret)
+library(lubridate)
+library(corrplot)
+# user name as one factor as one person has several observastions
+rawData$user_name <- as.factor(rawData$user_name) 
+rawData$cvtd_timestamp <- dmy_hm(rawData$cvtd_timestamp)
+rawData$classe <- as.factor(rawData$classe)
+predicting$user_name <- as.factor(predicting$user_name)
+predicting$cvtd_timestamp <- dmy_hm(predicting$cvtd_timestamp)
+predicting$problem_id <- as.factor(predicting$problem_id)
+rawData <- rawData[,-c(2,3,5,6)] #removing timestamp and windows (overlapping info)
+predicting<- predicting[,-c(2,3,5,6)]
+dim(rawData)
+#compute columns with little variance 
+NZV <- nearZeroVar(rawData) 
+#removing columns with not much variance
+rawData <- rawData[, -NZV] 
+predicting <- predicting[, -NZV]
+dim(rawData)
+
+#compute if NA is larger than 95 percent
+AllNA    <- sapply(rawData, function(x) mean(is.na(x))) > 0.95
+#removing columns with NA > 95%
+rawData <- rawData[, AllNA==FALSE] 
+predicting <- predicting[, AllNA==FALSE]
+
+dim(rawData)
+sum(is.na(rawData))
+
+
+set.seed(123456)
+
+inTrain = createDataPartition(rawData$classe, p = 3/4)[[1]]
+training <- rawData[inTrain, ]
+testing <- rawData[-inTrain, ]
+dim(training)
+
+## Exploratory Data analysis
+
+library(ggplot2)
+myColors <- colorRampPalette(c("cyan", "deeppink3")) 
+heatmap(as.matrix(rawData[5:54]), col=myColors(100))
+corMatrix <- cor(rawData[5:54])
+corrplot(corMatrix, method='color', order='FPC', type='lower')
+
+#From the Heatmap we can see that Normalization are not needed for the data, 
+#from the correlation we can see a cluster of positively correlated data on upper and bottom of the columns, thus we could try to use Decision Tree.
+
+## Modelling data
+
+library(rpart)
+library(rattle)
+decTreeFit <- rpart(classe~., data=training, method='class')
+#show the decision tree plot 
+fancyRpartPlot(decTreeFit)
+decTreeTrain <- predict(decTreeFit, newdata = training, type='class')
+confusionMatrix(data=decTreeTrain, reference = training$classe)
+#predict classe on testing data
+decTreePred <- predict(decTreeFit, newdata = testing, type='class')
+# compare the prediction result and true result; accuracy is 82%
+confusionMatrix(data=decTreePred, reference = testing$classe)
+
+#We can see that Decision Tree giving an accuracy of 82% which is not enough, we could tuning the model predictor or we can change the algorithm with random forest which is an ensemble method of decision Tree sacrificing the explainability
+#use cross validation 3 times by using different part as training and testing 
+#use random forest method 
+
+library(randomForest)
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+randForestFit <- train(classe~., data=training, method='rf', trControl=controlRF)
+randForestTrain <- predict(randForestFit, newdata = training)
+confusionMatrix(data=randForestTrain, reference = training$classe)
+
+randForestPred <- predict(randForestFit, newdata = testing)
+confusionMatrix(data=randForestPred, reference = testing$classe)
+
+#Random forest algorithm give an accuracy of 99.9% which is really good, thus we choose random forest algorithm as the clustering method.
+## Predicting Data
+
+finalModelResult <- predict(randForestFit, newdata=predicting)
+finalModelResult
